@@ -16,3 +16,6 @@ omegaconf
 hf_transfer
 pyloudnorm
 gdown
+pydub
+kinya-tn
+perth @ git+https://github.com/notdaniel/Perth@8e0cf31f406690ffc256b9fd732b8cc4be40a7a6

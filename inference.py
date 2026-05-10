@@ -37,16 +37,18 @@ else:
     
     FINETUNED_WEIGHTS = os.path.join(OUTPUT_DIR, "t3_finetuned.safetensors")
     PARAMS = {
-        "temperature": 0.8,
+        "temperature": 0.9,
         "exaggeration": 0.5,
         "cfg_weight": 0.5,
         "repetition_penalty": 1.2,
     }
 
 
-TEXT_TO_SAY = "Bu, artık hem normal hem de turbo modelleri otomatik olarak destekleyen yeni çıkarım komut dosyasının bir testidir."
-AUDIO_PROMPT = "./reference.wav"
-OUTPUT_FILE = "./output.wav"
+# TEXT_TO_SAY = "Bu, artık hem normal hem de turbo modelleri otomatik olarak destekleyen yeni çıkarım komut dosyasının bir testidir."
+# TEXT_TO_SAY = "amakuru yanyu bene wacu"
+TEXT_TO_SAY = "umwana w'inzozi. ndi umwana muto, mfite inzozi nziza, nzazikuza neza, nzazigeraho nta nzitiza. Nkunda ishuri cyane, ni ryo rimpa urumuri, rikanyigisha byinshi, nkamenya ukuri. Iyo mbyutse kare, nitegura vuba, ngafata igitabo, nkiga nta bunebwe na mba."
+AUDIO_PROMPT = "./speaker_reference/reference.wav"
+OUTPUT_FILE = "./output_full.wav"
 
 
 

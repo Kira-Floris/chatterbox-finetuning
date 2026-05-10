@@ -18,11 +18,11 @@ class TrainConfig:
     #preprocessed_dir = "./FileBasedDataset/preprocess"
     
     # Output directory for the finetuned model
-    output_dir: str = "./chatterbox_output"
+    output_dir: str = "./chatterbox_output_redo"
     
     is_inference = False
-    inference_prompt_path: str = "./speaker_reference/2.wav"
-    inference_test_text: str = "Merhaba, sesimi geliştirmem oldukça uzun zaman aldı ve şimdi sahip olduğuma göre, sessiz kalmayacağım."
+    inference_prompt_path: str = "./speaker_reference/reference.wav"
+    inference_test_text: str = "Muraho, izina ryanjye ni Claude, kandi nishimiye kukubwira ibyerekeye ururimi rw'Ikinyarwanda."
 
 
     ljspeech = True # Set True if the dataset format is ljspeech, and False if it's file-based.
@@ -38,18 +38,18 @@ class TrainConfig:
     new_vocab_size: int = 52260 if is_turbo else 2454 
 
     # --- Hyperparameters ---
-    batch_size: int = 16         # Adjust based on VRAM (2, 4, 8)
+    batch_size: int = 64         # Adjust based on VRAM (2, 4, 8)
     grad_accum: int = 2        # Effective Batch Size = Batch * Accum
     learning_rate: float = 1e-5 # T3 is sensitive, keep low
-    num_epochs: int = 120
+    num_epochs: int = 2 # 120
     
     save_steps: int = 500
     save_total_limit: int = 5
-    dataloader_num_workers: int = 8
+    dataloader_num_workers: int = 16
 
     # --- Constraints ---
     start_text_token = 255
     stop_text_token = 0
-    max_text_len: int = 256
-    max_speech_len: int = 850   # Truncates very long audio
+    max_text_len: int = 500
+    max_speech_len: int = 3500   # Truncates very long audio
     prompt_duration: float = 3.0 # Duration for the reference prompt (seconds)
