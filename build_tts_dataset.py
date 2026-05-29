@@ -16,17 +16,19 @@ Usage:
     python build_tts_dataset.py
 
 Optional flags:
-    --output_dir    Root output directory       (default: MyTTSDataset)
-    --domain        Comma-separated domains, e.g. 'agriculture,health'
-                    Available: agriculture, education, financial, government,
-                               health, scripted_education
-    --split         Comma-separated split types, e.g. 'train,validation'
-                    Available: train, validation, test
-    --sample_rate   Target sample rate: 16000, 22050, or 44100  (default: 22050)
-    --num_workers   Parallel audio-write workers                 (default: 60)
-    --resume        Skip WAV files that already exist            (default: True)
-    --cache_dir     HuggingFace cache directory
-    --streaming     Stream dataset without full download         (default: False)
+    --output_dir      Root output directory       (default: MyTTSDataset)
+    --domain          Comma-separated domains, e.g. 'agriculture,health'
+                      Available: agriculture, education, financial, government,
+                                 health, scripted_education
+    --split           Comma-separated split types, e.g. 'train,validation'
+                      Available: train, validation, test
+    --sample_rate     Target sample rate: 16000, 22050, or 44100  (default: 22050)
+    --num_workers     Parallel audio-write workers                 (default: 60)
+    --resume          Skip WAV files that already exist            (default: True)
+    --cache_dir       HuggingFace cache directory
+    --streaming       Stream dataset without full download         (default: False)
+    --transcriptions  Path to transcriptions.csv for raw_text replacement
+    --backup          Save a .bak copy of metadata before overwriting (default: True)
 
 Requirements:
     pip install datasets pydub soundfile kinya-tn tqdm numpy
@@ -36,11 +38,14 @@ Requirements:
 import argparse
 import csv
 import io
+import re
+import shutil
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import soundfile as sf
 from pydub import AudioSegment
 from datasets import load_dataset, get_dataset_split_names
@@ -103,11 +108,8 @@ def bytes_to_numpy(raw: bytes) -> tuple[np.ndarray, int] | tuple[None, None]:
     # ── pydub / ffmpeg fallback (handles WebM, MP3, M4A, …) ─────────────────
     try:
         seg = AudioSegment.from_file(io.BytesIO(raw))
-        # Convert pydub AudioSegment → float32 numpy
         samples = np.array(seg.get_array_of_samples(), dtype=np.float32)
-        # Normalise to [-1, 1]
         samples /= float(1 << (8 * seg.sample_width - 1))
-        # Handle stereo: reshape to (n_samples, n_channels) then average
         if seg.channels > 1:
             samples = samples.reshape(-1, seg.channels).mean(axis=1)
         return samples, seg.frame_rate
@@ -127,13 +129,11 @@ def decode_audio(audio_value) -> tuple[np.ndarray, int] | tuple[None, None]:
       4. Raw bytes     : b"\\x1aE\\xdf\\xa3..."
     """
     try:
-        # Case 1 — already decoded by HF
         if isinstance(audio_value, dict) and "array" in audio_value:
             arr = np.array(audio_value["array"], dtype=np.float32)
             sr  = int(audio_value["sampling_rate"])
             return arr, sr
 
-        # Case 2 — dict with bytes / path (this dataset stores WebM bytes here)
         if isinstance(audio_value, dict):
             raw   = audio_value.get("bytes")
             path  = audio_value.get("path")
@@ -145,17 +145,14 @@ def decode_audio(audio_value) -> tuple[np.ndarray, int] | tuple[None, None]:
                 arr, sr = sf.read(path, dtype="float32", always_2d=False)
                 return arr, sr
 
-            # last resort: any bytes-like value in the dict
             for v in audio_value.values():
                 if isinstance(v, (bytes, bytearray)) and len(v) > 44:
                     return bytes_to_numpy(bytes(v))
 
-        # Case 3 — plain file path
         if isinstance(audio_value, str) and Path(audio_value).exists():
             arr, sr = sf.read(audio_value, dtype="float32", always_2d=False)
             return arr, sr
 
-        # Case 4 — raw bytes object
         if isinstance(audio_value, (bytes, bytearray)):
             return bytes_to_numpy(bytes(audio_value))
 
@@ -206,16 +203,105 @@ def write_wav_worker(args: tuple) -> str | None:
         return None
 
 
+# ── Text helpers ──────────────────────────────────────────────────────────────
+
+def normalize_for_tts(text: str) -> str:
+    """Strip all punctuation (including - _ ,) then normalize via kinya_tn."""
+    text = re.sub(r"[^\w\s]", "", text)
+    text = re.sub(r"_", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text_normalization.normalize(text)
+
+
+# ── Raw-text replacement ──────────────────────────────────────────────────────
+
+def replace_raw_text_from_transcriptions(
+    metadata_path: Path,
+    transcriptions_path: Path,
+    backup: bool = True,
+    output_path: Path | None = None,
+) -> None:
+    """
+    Replaces raw_text (and re-normalises normalized_text) in metadata_path
+    using punctuated text from transcriptions_path, matched on:
+
+        metadata.raw_text  ==  transcriptions.text   (case-insensitive, stripped)
+
+    Unmatched rows are always dropped.
+
+    Args:
+        metadata_path:        Path to the pipe-delimited metadata.csv to update.
+        transcriptions_path:  Path to transcriptions.csv with 'text' and 'raw_text' cols.
+        backup:               Write a .bak copy before overwriting.
+        output_path:          Where to write output; defaults to metadata_path (in-place).
+    """
+    output_path = output_path or metadata_path
+
+    meta = pd.read_csv(
+        metadata_path,
+        sep="|", header=None,
+        names=["filename", "raw_text", "normalized_text"],
+        dtype=str, keep_default_na=False,
+    )
+    trans = pd.read_csv(transcriptions_path, dtype=str, keep_default_na=False)
+
+    if "raw_text" not in trans.columns or "text" not in trans.columns:
+        raise ValueError(
+            f"transcriptions.csv must have 'raw_text' and 'text' columns. "
+            f"Found: {list(trans.columns)}"
+        )
+
+    # ── Build lookup: stripped-lowercase text → punctuated raw_text ──────────
+    lookup: dict[str, str] = {
+        row["text"].strip().lower(): row["raw_text"].strip()
+        for _, row in trans.drop_duplicates(subset=["text"]).iterrows()
+    }
+    print(f"\n🔑 replace_raw_text: {len(lookup):,} lookup entries")
+
+    # ── Match — unmatched rows are dropped ────────────────────────────────────
+    matched = unmatched_count = 0
+    rows_out = []
+
+    for _, row in meta.iterrows():
+        key         = row["raw_text"].strip().lower()
+        replacement = lookup.get(key)
+
+        if replacement is None:
+            unmatched_count += 1
+            continue
+
+        matched += 1
+        rows_out.append([row["filename"], replacement, normalize_for_tts(replacement)])
+
+    match_pct = matched / max(len(meta), 1) * 100
+    print(f"  ✅ Matched   : {matched:,}  ({match_pct:.1f}%)")
+    print(f"  🗑  Dropped   : {unmatched_count:,} unmatched rows")
+
+    # ── Backup + write ────────────────────────────────────────────────────────
+    if backup and output_path == metadata_path and metadata_path.exists():
+        backup_path = metadata_path.with_suffix(".csv.bak")
+        shutil.copy2(metadata_path, backup_path)
+        print(f"💾 Backup saved : {backup_path}")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh, delimiter="|", quoting=csv.QUOTE_MINIMAL).writerows(rows_out)
+
+    print(f"💾 Saved to     : {output_path.resolve()}  ({len(rows_out):,} rows)\n")
+
+
 # ── Main pipeline ─────────────────────────────────────────────────────────────
 
 def build_ljspeech_dataset(
-    output_dir:  Path,
-    hf_splits:   list[str],
-    sample_rate: int,
-    num_workers: int,
-    resume:      bool,
-    cache_dir:   str | None,
-    streaming:   bool,
+    output_dir:           Path,
+    hf_splits:            list[str],
+    sample_rate:          int,
+    num_workers:          int,
+    resume:               bool,
+    cache_dir:            str | None,
+    streaming:            bool,
+    transcriptions_path:  Path | None = None,
+    backup:               bool = True,
 ) -> None:
     wavs_dir      = output_dir / "wavs"
     metadata_path = output_dir / "metadata.csv"
@@ -319,23 +405,35 @@ def build_ljspeech_dataset(
             for local_i, (stem, raw_text) in enumerate(zip(stems, texts)):
                 if local_i in split_failed:
                     continue
-                normalized = text_normalization.normalize(raw_text)
+                normalized = normalize_for_tts(raw_text)
                 writer.writerow([stem, raw_text, normalized])
                 written += 1
 
             print(f"   ✅ {len(jobs) - len(split_failed):,} entries done for {hf_split}\n")
 
+    # ── Optional: replace raw_text from transcriptions ────────────────────────
+    if transcriptions_path is not None and transcriptions_path.exists():
+        print("🔄 Replacing raw_text from transcriptions.csv …")
+        replace_raw_text_from_transcriptions(
+            metadata_path       = metadata_path,
+            transcriptions_path = transcriptions_path,
+            backup              = backup,
+        )
+    elif transcriptions_path is not None:
+        print(f"⚠  transcriptions file not found, skipping replacement: {transcriptions_path}")
+
     # ── Summary ───────────────────────────────────────────────────────────────
+    final_rows = written  # may be reduced by replace step; re-count if needed
     print(f"{'─'*60}")
-    print(f"  Total entries  : {written:,}")
+    print(f"  Total entries  : {final_rows:,}")
     if failed_total:
         print(f"  ⚠  Failures    : {failed_total:,}")
-    est_min   = written * 4 / 60
+    est_min   = final_rows * 4 / 60
     meets_min = est_min >= 30
     print(f"  Est. duration  : ~{est_min:.1f} min "
           f"({'✅ meets' if meets_min else '⚠  below'} 30-min minimum)")
     print(f"\n  {output_dir}/")
-    print(f"  ├── metadata.csv   ({written:,} rows)")
+    print(f"  ├── metadata.csv   ({final_rows:,} rows)")
     print(f"  └── wavs/          ({written:,} WAV files @ {sample_rate} Hz)")
     print(f"{'─'*60}")
 
@@ -346,18 +444,25 @@ def main():
     parser = argparse.ArgumentParser(
         description="Build an LJSpeech TTS dataset from HuggingFace Afrivoice-Kinyarwanda-ASR."
     )
-    parser.add_argument("--output_dir",  type=Path, default="MyTTSDataset")
-    parser.add_argument("--domain",      default="scripted_education,agriculture,health,financial,government,education",
+    parser.add_argument("--output_dir",      type=Path, default="MyTTSDataset")
+    # parser.add_argument("--domain",          default="scripted_education,agriculture,health,financial,government,education",
+    #                     help=f"Comma-separated domains. "
+    #                          f"Choices: {', '.join(sorted(VALID_DOMAINS))}")
+    parser.add_argument("--domain",          default="scripted_education",
                         help=f"Comma-separated domains. "
                              f"Choices: {', '.join(sorted(VALID_DOMAINS))}")
-    parser.add_argument("--split",       default="train,test,validation",
+    parser.add_argument("--split",           default="train,test,validation",
                         help="Comma-separated split types: train, validation, test.")
-    parser.add_argument("--sample_rate", default=22050, type=int,
+    parser.add_argument("--sample_rate",     default=22050, type=int,
                         choices=sorted(VALID_SAMPLE_RATES))
-    parser.add_argument("--num_workers", default=60, type=int)
-    parser.add_argument("--resume",      action="store_true", default=True)
-    parser.add_argument("--cache_dir",   default=None)
-    parser.add_argument("--streaming",   action="store_true", default=False)
+    parser.add_argument("--num_workers",     default=60, type=int)
+    parser.add_argument("--resume",          action="store_true", default=True)
+    parser.add_argument("--cache_dir",       default=None)
+    parser.add_argument("--streaming",       action="store_true", default=False)
+    parser.add_argument("--transcriptions",  type=Path, default=None,
+                        help="Path to transcriptions.csv for raw_text replacement.")
+    parser.add_argument("--backup",          action="store_true", default=True,
+                        help="Save a .bak copy of metadata before overwriting.")
     args = parser.parse_args()
 
     output_dir = args.output_dir.expanduser().resolve()
@@ -389,13 +494,15 @@ def main():
     print(f"   Selected: {target_splits}")
 
     build_ljspeech_dataset(
-        output_dir  = output_dir,
-        hf_splits   = target_splits,
-        sample_rate = args.sample_rate,
-        num_workers = args.num_workers,
-        resume      = args.resume,
-        cache_dir   = args.cache_dir,
-        streaming   = args.streaming,
+        output_dir          = output_dir,
+        hf_splits           = target_splits,
+        sample_rate         = args.sample_rate,
+        num_workers         = args.num_workers,
+        resume              = args.resume,
+        cache_dir           = args.cache_dir,
+        streaming           = args.streaming,
+        transcriptions_path = args.transcriptions,
+        backup              = args.backup,
     )
 
     print(f"\n🎉 Done! Dataset ready at: {output_dir}\n")
