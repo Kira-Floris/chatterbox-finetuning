@@ -406,7 +406,11 @@ def build_ljspeech_dataset(
                 if local_i in split_failed:
                     continue
                 normalized = normalize_for_tts(raw_text)
-                writer.writerow([stem, raw_text, normalized])
+                row_parts = [stem, raw_text, normalized]
+                if sum(p.count("|") for p in row_parts) > 2:
+                    failed_total += 1
+                    continue
+                writer.writerow(row_parts)
                 written += 1
 
             print(f"   ✅ {len(jobs) - len(split_failed):,} entries done for {hf_split}\n")
