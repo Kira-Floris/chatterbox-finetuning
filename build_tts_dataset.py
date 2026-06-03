@@ -462,7 +462,7 @@ def main():
     parser.add_argument("--num_workers",     default=1, type=int)
     parser.add_argument("--resume",          action="store_true", default=True)
     parser.add_argument("--cache_dir",       default=None)
-    parser.add_argument("--streaming",       action="store_true", default=False)
+    parser.add_argument("--streaming",       action="store_true", default=True)
     parser.add_argument("--transcriptions",  type=Path, default=None,
                         help="Path to transcriptions.csv for raw_text replacement.")
     parser.add_argument("--backup",          action="store_true", default=True,
