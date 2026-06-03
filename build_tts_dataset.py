@@ -230,7 +230,10 @@ def normalize_for_tts(text: str) -> str:
     text = re.sub(r"[^\w\s]", "", text)
     text = re.sub(r"_", "", text)
     text = re.sub(r"\s+", " ", text).strip()
-    return text_normalization.normalize(text)
+    try:
+        return text_normalization.normalize(text)
+    except Exception:
+        return text
 
 
 # ── Raw-text replacement ──────────────────────────────────────────────────────
@@ -441,12 +444,13 @@ def build_ljspeech_dataset(
                     pool.submit(write_wav_worker, job): local_i
                     for local_i, job in enumerate(jobs)
                 }
-                for future in tqdm(as_completed(future_to_local), total=len(future_to_local)):
+                for future in tqdm(as_completed(future_to_local), total=len(future_to_local), desc=f"  {hf_split}"):
                     dst_path, transcription, ok = future.result()
                     if ok and dst_path:
                         stem = Path(dst_path).stem
                         normalized = normalize_for_tts(transcription)
                         writer.writerow([stem, transcription, normalized])
+                        written += 1
                     else:
                         failed_total += 1
 
@@ -463,7 +467,7 @@ def build_ljspeech_dataset(
                     failed_total += 1
                     continue
                 writer.writerow(row_parts)
-                written += 1
+                # written += 1
 
             print(f"   ✅ {len(jobs) - len(split_failed):,} entries done for {hf_split}\n")
 
