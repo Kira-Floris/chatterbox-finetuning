@@ -182,25 +182,45 @@ def resample_numpy(array: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarra
 
 # ── WAV writer (runs in thread pool) ─────────────────────────────────────────
 
-def write_wav_worker(args: tuple) -> str | None:
-    """Returns dst_path on success, None on failure."""
-    local_i, audio_arr, orig_sr, dst_path, target_sr, resume = args
+# def write_wav_worker(args: tuple) -> str | None:
+#     """Returns dst_path on success, None on failure."""
+#     local_i, audio_arr, orig_sr, dst_path, target_sr, resume = args
+
+#     if resume and Path(dst_path).exists():
+#         return dst_path
+
+#     try:
+#         if audio_arr.ndim == 2:
+#             audio_arr = audio_arr.mean(axis=1)
+#         audio_arr = audio_arr.astype(np.float32)
+
+#         if orig_sr != target_sr:
+#             audio_arr = resample_numpy(audio_arr, orig_sr, target_sr)
+
+#         sf.write(dst_path, audio_arr, target_sr, subtype="PCM_16")
+#         return dst_path
+#     except Exception:
+#         return None
+
+def write_wav_worker(args):
+    local_i, audio_value, transcription, dst_path, target_sr, resume = args
 
     if resume and Path(dst_path).exists():
-        return dst_path
+        return dst_path, transcription, True
+
+    arr, orig_sr = decode_audio(audio_value)
+    if arr is None:
+        return None, transcription, False
 
     try:
-        if audio_arr.ndim == 2:
-            audio_arr = audio_arr.mean(axis=1)
-        audio_arr = audio_arr.astype(np.float32)
-
+        if arr.ndim == 2:
+            arr = arr.mean(axis=1)
         if orig_sr != target_sr:
-            audio_arr = resample_numpy(audio_arr, orig_sr, target_sr)
-
-        sf.write(dst_path, audio_arr, target_sr, subtype="PCM_16")
-        return dst_path
+            arr = resample_numpy(arr, orig_sr, target_sr)
+        sf.write(dst_path, arr.astype(np.float32), target_sr, subtype="PCM_16")
+        return dst_path, transcription, True
     except Exception:
-        return None
+        return None, transcription, False
 
 
 # ── Text helpers ──────────────────────────────────────────────────────────────
@@ -358,44 +378,76 @@ def build_ljspeech_dataset(
             stems = []
             texts = []
 
-            for row in tqdm(all_rows, desc=f"  prep {hf_split}"):
-                transcription = (
-                    row.get("transcription") or row.get("text") or ""
-                ).strip()
+            # for row in tqdm(all_rows, desc=f"  prep {hf_split}"):
+            #     transcription = (
+            #         row.get("transcription") or row.get("text") or ""
+            #     ).strip()
+            #     if not transcription:
+            #         continue
+
+            #     arr, sr = decode_audio(row.get("audio"))
+            #     if arr is None:
+            #         failed_total += 1
+            #         continue
+
+            #     global_idx += 1
+            #     stem     = f"recording_{global_idx:08d}"
+            #     dst_path = str(wavs_dir / f"{stem}.wav")
+
+            #     stems.append(stem)
+            #     texts.append(transcription)
+            #     jobs.append((global_idx, arr, sr, dst_path, sample_rate, resume))
+
+            # PREP LOOP — just build job list, no decoding
+            for row in tqdm(all_rows, desc=f"prep {hf_split}"):
+                transcription = (row.get("transcription") or row.get("text") or "").strip()
                 if not transcription:
                     continue
-
-                arr, sr = decode_audio(row.get("audio"))
-                if arr is None:
-                    failed_total += 1
-                    continue
-
                 global_idx += 1
-                stem     = f"recording_{global_idx:08d}"
+                stem = f"recording_{global_idx:08d}"
                 dst_path = str(wavs_dir / f"{stem}.wav")
-
-                stems.append(stem)
-                texts.append(transcription)
-                jobs.append((global_idx, arr, sr, dst_path, sample_rate, resume))
+            
+                jobs.append((
+                    global_idx,
+                    row.get("audio"),   # ← raw, NOT decoded
+                    transcription,
+                    dst_path,
+                    sample_rate,
+                    resume,
+                ))
 
             print(f"   {len(jobs):,} jobs queued — writing WAVs …")
 
             # ── Parallel WAV write ─────────────────────────────────────────
             split_failed: set[int] = set()
 
+            # with ThreadPoolExecutor(max_workers=num_workers) as pool:
+            #     future_to_local = {
+            #         pool.submit(write_wav_worker, job): local_i
+            #         for local_i, job in enumerate(jobs)
+            #     }
+            #     for future in tqdm(
+            #         as_completed(future_to_local),
+            #         total=len(future_to_local),
+            #         desc=f"  {hf_split}",
+            #     ):
+            #         local_i = future_to_local[future]
+            #         if future.result() is None:
+            #             split_failed.add(local_i)
+            #             failed_total += 1
+
             with ThreadPoolExecutor(max_workers=num_workers) as pool:
                 future_to_local = {
                     pool.submit(write_wav_worker, job): local_i
                     for local_i, job in enumerate(jobs)
                 }
-                for future in tqdm(
-                    as_completed(future_to_local),
-                    total=len(future_to_local),
-                    desc=f"  {hf_split}",
-                ):
-                    local_i = future_to_local[future]
-                    if future.result() is None:
-                        split_failed.add(local_i)
+                for future in tqdm(as_completed(future_to_local), total=len(future_to_local)):
+                    dst_path, transcription, ok = future.result()
+                    if ok and dst_path:
+                        stem = Path(dst_path).stem
+                        normalized = normalize_for_tts(transcription)
+                        writer.writerow([stem, transcription, normalized])
+                    else:
                         failed_total += 1
 
             if split_failed:
