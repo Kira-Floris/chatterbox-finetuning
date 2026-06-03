@@ -461,7 +461,7 @@ def main():
                         help="Comma-separated split types: train, validation, test.")
     parser.add_argument("--sample_rate",     default=22050, type=int,
                         choices=sorted(VALID_SAMPLE_RATES))
-    parser.add_argument("--num_workers",     default=1, type=int)
+    parser.add_argument("--num_workers",     default=16, type=int)
     parser.add_argument("--resume",          action="store_true", default=True)
     parser.add_argument("--cache_dir",       default=None)
     parser.add_argument("--streaming",       action="store_true", default=False)
