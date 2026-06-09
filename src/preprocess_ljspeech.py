@@ -299,7 +299,7 @@ def preprocess_dataset_ljspeech(
         num_load_workers:  Threads for parallel WAV loading.
                            Set to number of CPU cores (or slightly above).
     """
-    data = pd.read_csv(config.csv_path, sep="\t", quoting=3)
+    data = pd.read_csv(config.csv_path, sep="|", header=None, quoting=3)
     os.makedirs(config.preprocessed_dir, exist_ok=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
