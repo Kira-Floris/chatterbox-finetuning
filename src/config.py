@@ -7,21 +7,21 @@ class TrainConfig:
     model_dir: str = "./pretrained_models"
     
     # Path to your metadata CSV (Format: ID|RawText|NormText)
-    csv_path: str = "./MyTTSDataset/metadata.csv"
+    csv_path: str = "./TTSDataset/metadata.csv"
     metadata_path: str = "./metadata.json"
     
     # Directory containing WAV files
-    wav_dir: str = "./MyTTSDataset/wavs"
+    wav_dir: str = "./TTSDataset/wavs"
     #wav_dir: str = "./FileBasedDataset"
     
-    preprocessed_dir = "./MyTTSDataset/preprocess"
+    preprocessed_dir = "./TTSDataset/preprocess"
     #preprocessed_dir = "./FileBasedDataset/preprocess"
     
     # Output directory for the finetuned model
-    output_dir: str = "./chatterbox_output_redo"
+    output_dir: str = "./chatterbox_output/chatterbox_stage1_asr_2epochs"
     
     is_inference = False
-    inference_prompt_path: str = "./speaker_reference/reference.wav"
+    inference_prompt_path: str = "./speaker_reference/ref.wav"
     inference_test_text: str = "Muraho, izina ryanjye ni Claude, kandi nishimiye kukubwira ibyerekeye ururimi rw'Ikinyarwanda."
 
 
@@ -38,7 +38,7 @@ class TrainConfig:
     new_vocab_size: int = 52260 if is_turbo else 2454 
 
     # --- Hyperparameters ---
-    batch_size: int = 64         # Adjust based on VRAM (2, 4, 8)
+    batch_size: int = 32         # Adjust based on VRAM (2, 4, 8)
     grad_accum: int = 2        # Effective Batch Size = Batch * Accum
     learning_rate: float = 1e-5 # T3 is sensitive, keep low
     num_epochs: int = 2 # 120
