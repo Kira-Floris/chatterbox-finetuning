@@ -12,6 +12,7 @@ from src.config import TrainConfig
 from src.chatterbox_.tts import ChatterboxTTS
 from src.chatterbox_.tts_turbo import ChatterboxTurboTTS
 from src.chatterbox_.models.t3.t3 import T3
+from kinya_tn import text_normalization
 
 
 logger = setup_logger("Chatterbox-Inference")
@@ -46,9 +47,11 @@ else:
 
 # TEXT_TO_SAY = "Bu, artık hem normal hem de turbo modelleri otomatik olarak destekleyen yeni çıkarım komut dosyasının bir testidir."
 # TEXT_TO_SAY = "amakuru yanyu bene wacu"
-TEXT_TO_SAY = "umwana w'inzozi. ndi umwana muto, mfite inzozi nziza, nzazikuza neza, nzazigeraho nta nzitiza. Nkunda ishuri cyane, ni ryo rimpa urumuri, rikanyigisha byinshi, nkamenya ukuri. Iyo mbyutse kare, nitegura vuba, ngafata igitabo, nkiga nta bunebwe na mba."
+TEXT_TO_SAY = "UMWANA W'INZOZI. Ndi umwana muto, mfite inzozi nziza, nzazikuza neza, nzazigeraho nta nzitiza. Nkunda ishuri cyane, ni ryo rimpa urumuri, rikanyigisha byinshi, nkamenya ukuri. Iyo mbyutse kare, nitegura vuba, ngafata igitabo, nkiga nta bunebwe na mba."
 AUDIO_PROMPT = "./speaker_reference/reference.wav"
-OUTPUT_FILE = "./output_full.wav"
+OUTPUT_FILE = "./chatterbox_output/chatterbox_stage1_asr_2epochs/output_full.wav"
+
+TEXT_TO_SAY = text_normalization.normalize(TEXT_TO_SAY)
 
 
 
