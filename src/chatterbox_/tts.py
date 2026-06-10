@@ -151,26 +151,26 @@ class ChatterboxTTS:
         )
         ve.to(device).eval()
 
-        # t3 = T3()
-        # t3_state = load_file(ckpt_dir / "t3_cfg.safetensors")
-        # if "model" in t3_state.keys():
-        #     t3_state = t3_state["model"][0]
-        # t3.load_state_dict(t3_state)
-
-        t3 = T3(hp=_get_t3_config(ckpt_dir))
+        t3 = T3()
         t3_state = load_file(ckpt_dir / "t3_cfg.safetensors")
         if "model" in t3_state.keys():
             t3_state = t3_state["model"][0]
-        # If vocab sizes differ (e.g. loading English pretrained weights with
-        # a Kinyarwanda tokenizer) drop the embedding layers so train.py can
-        # reinitialize them with the correct new_vocab_size
-        ckpt_vocab = t3_state.get("text_emb.weight")
-        if ckpt_vocab is not None and ckpt_vocab.shape[0] != t3.hp.text_tokens_dict_size:
-            print(f"  ⚠  Vocab mismatch: ckpt={ckpt_vocab.shape[0]} "
-                  f"tokenizer={t3.hp.text_tokens_dict_size} — reinitializing embeddings")
-            t3_state.pop("text_emb.weight", None)
-            t3_state.pop("text_head.weight", None)
-        t3.load_state_dict(t3_state, strict=False)
+        t3.load_state_dict(t3_state)
+
+        # t3 = T3(hp=_get_t3_config(ckpt_dir))
+        # t3_state = load_file(ckpt_dir / "t3_cfg.safetensors")
+        # if "model" in t3_state.keys():
+        #     t3_state = t3_state["model"][0]
+        # # If vocab sizes differ (e.g. loading English pretrained weights with
+        # # a Kinyarwanda tokenizer) drop the embedding layers so train.py can
+        # # reinitialize them with the correct new_vocab_size
+        # ckpt_vocab = t3_state.get("text_emb.weight")
+        # if ckpt_vocab is not None and ckpt_vocab.shape[0] != t3.hp.text_tokens_dict_size:
+        #     print(f"  ⚠  Vocab mismatch: ckpt={ckpt_vocab.shape[0]} "
+        #           f"tokenizer={t3.hp.text_tokens_dict_size} — reinitializing embeddings")
+        #     t3_state.pop("text_emb.weight", None)
+        #     t3_state.pop("text_head.weight", None)
+        # t3.load_state_dict(t3_state, strict=False)
         
         t3.to(device).eval()
 
